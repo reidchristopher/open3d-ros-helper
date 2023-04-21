@@ -248,7 +248,7 @@ convert_rgbUint32_to_tuple = lambda rgb_uint32: (
     (rgb_uint32 & 0x00ff0000)>>16, (rgb_uint32 & 0x0000ff00)>>8, (rgb_uint32 & 0x000000ff)
 )
 
-def rospc_to_o3dpc(rospc, remove_nans=False):
+def rospc_to_o3dpc(rospc, remove_nans=False, intensity_scale=None):
     """ covert ros point cloud to open3d point cloud
     Args: 
         rospc (sensor.msg.PointCloud2): ros point cloud message
@@ -258,14 +258,15 @@ def rospc_to_o3dpc(rospc, remove_nans=False):
     """
     field_names = [field.name for field in rospc.fields]
     is_rgb = 'rgb' in field_names
+    is_intensity = "intensity" in field_names
     cloud_array = ros_numpy.point_cloud2.pointcloud2_to_array(rospc).ravel()
     if remove_nans:
         mask = np.isfinite(cloud_array['x']) & np.isfinite(cloud_array['y']) & np.isfinite(cloud_array['z'])
         cloud_array = cloud_array[mask]
-    if is_rgb:
-        cloud_npy = np.zeros(cloud_array.shape + (4,), dtype=np.float)
+    if is_rgb or is_intensity:
+        cloud_npy = np.zeros(cloud_array.shape + (4,), dtype=float)
     else: 
-        cloud_npy = np.zeros(cloud_array.shape + (3,), dtype=np.float)
+        cloud_npy = np.zeros(cloud_array.shape + (3,), dtype=float)
     
     cloud_npy[...,0] = cloud_array['x']
     cloud_npy[...,1] = cloud_array['y']
@@ -283,15 +284,22 @@ def rospc_to_o3dpc(rospc, remove_nans=False):
         g = np.asarray((rgb_npy >> 8) & 255, dtype=np.uint8)
         b = np.asarray(rgb_npy & 255, dtype=np.uint8)
         rgb_npy = np.asarray([r, g, b])
-        rgb_npy = rgb_npy.astype(np.float)/255
+        rgb_npy = rgb_npy.astype(float)/255
         rgb_npy = np.swapaxes(rgb_npy, 0, 1)
         o3dpc.colors = open3d.utility.Vector3dVector(rgb_npy)
+    elif is_intensity and intensity_scale is not None:
+        intensity_npy = cloud_array['intensity']
+        intensity_npy = np.asarray([intensity_npy] * 3)
+        intensity_npy = intensity_npy.astype(float) / intensity_scale
+        intensity_npy = np.swapaxes(intensity_npy, 0, 1)
+        o3dpc.colors = open3d.utility.Vector3dVector(intensity_npy)
+
     return o3dpc
 
 BIT_MOVE_16 = 2**16
 BIT_MOVE_8 = 2**8
 
-def o3dpc_to_rospc(o3dpc, frame_id=None, stamp=None):
+def o3dpc_to_rospc(o3dpc, frame_id=None, stamp=None, intensity_scale=None):
     """ convert open3d point cloud to ros point cloud
     Args:
         o3dpc (open3d.geometry.PointCloud): open3d point cloud
@@ -306,7 +314,14 @@ def o3dpc_to_rospc(o3dpc, frame_id=None, stamp=None):
         
 
     n_points = len(cloud_npy[:, 0])
-    if is_color:
+    if intensity_scale is not None:
+        data = np.zeros(n_points, dtype=[
+        ('x', np.float32),
+        ('y', np.float32),
+        ('z', np.float32),
+        ('intensity', np.float32)
+        ])
+    elif is_color:
         data = np.zeros(n_points, dtype=[
         ('x', np.float32),
         ('y', np.float32),
@@ -324,11 +339,15 @@ def o3dpc_to_rospc(o3dpc, frame_id=None, stamp=None):
     data['z'] = cloud_npy[:, 2]
     
     if is_color:
-        rgb_npy = np.asarray(copy.deepcopy(o3dpc.colors))
-        rgb_npy = np.floor(rgb_npy*255) # nx3 matrix
-        rgb_npy = rgb_npy[:, 0] * BIT_MOVE_16 + rgb_npy[:, 1] * BIT_MOVE_8 + rgb_npy[:, 2]  
-        rgb_npy = rgb_npy.astype(np.uint32)
-        data['rgb'] = rgb_npy
+        if intensity_scale is None:
+            rgb_npy = np.asarray(copy.deepcopy(o3dpc.colors))
+            rgb_npy = np.floor(rgb_npy*255) # nx3 matrix
+            rgb_npy = rgb_npy[:, 0] * BIT_MOVE_16 + rgb_npy[:, 1] * BIT_MOVE_8 + rgb_npy[:, 2]
+            rgb_npy = rgb_npy.astype(np.uint32)
+            data['rgb'] = rgb_npy
+        else:
+            intensity_npy = np.asarray(copy.deepcopy(o3dpc.colors))
+            data['intensity'] = (intensity_npy[:, 0] * intensity_scale).astype(np.float32)
 
     rospc = ros_numpy.msgify(PointCloud2, data)
     if frame_id is not None:
@@ -355,10 +374,16 @@ def o3dpc_to_rospc(o3dpc, frame_id=None, stamp=None):
                             datatype=PointField.FLOAT32, count=1))    
 
     if is_color:
-        rospc.fields.append(PointField(
-                        name="rgb",
-                        offset=12,
-                        datatype=PointField.UINT32, count=1))    
+        if intensity_scale is None:
+            rospc.fields.append(PointField(
+                            name="rgb",
+                            offset=12,
+                            datatype=PointField.UINT32, count=1))
+        else:
+            rospc.fields.append(PointField(
+                            name="intensity",
+                            offset=12,
+                            datatype=PointField.FLOAT32, count=1))
         rospc.point_step = 16
     else:
         rospc.point_step = 12
