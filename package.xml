@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model
+  href="http://download.ros.org/schema/package_format3.xsd"
+  schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>open3d_ros_helper</name>
+  <version>2.0.3</version>
+  <description>A python module for converting between open3d and ROS point data types</description>
+
+  <maintainer email="shback@gm.gist.ac.kr">Seunghyeok Back</maintainer>
+  
+  <license>MIT</license>
+
+  <exec_depend>ros_numpy</exec_depend>
+  <exec_depend>tf</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+</package>
